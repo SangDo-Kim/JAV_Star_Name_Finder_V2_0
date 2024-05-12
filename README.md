@@ -1,4 +1,4 @@
-# JAV_Star_Name_Finder_V2_0 GUI version for Korean
+JAV Star Names Finder V2.1 GUI Version
 Written by SangDo_Kim, a user in AVDBS.com
 This Python GUI program reads file names in a folder which is containing JAV (Japanese Adult Video) files,
 extract a product code from file names, and search a star name on Google UK search results
@@ -40,3 +40,11 @@ V2.0 변경 사항
 - JAV_prod_code 최신 버전으로 교체(품명 인식 개선)
 - 변수 이름 명명 규칙 변경(스네이크 형태)
 - 한국어만 지원(영어 제거)
+
+V2.01 변경 사항
+- 버그 잡기: 경로 선택 없이 출연자 검색 버튼을 누르면 프로그램 비정상 종료되던 문제 해결
+
+V2.1 변경 사항
+- 구글 검색 전 대기 시간 처리 부분을 기존 스레드에서 평범한 함수로 변경
+- 정보 및 질문 대화 상자를 기존 QDialog에서 QMessageBox로 교제.
+- 작업 결과 테이블 내용을 작업 시작 시 초기화함. 열 너비 조정.
