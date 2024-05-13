@@ -1,4 +1,4 @@
-"""JAV Star Names Finder V2.1 GUI Version
+"""JAV Star Names Finder V2.12 GUI Version
 Written by SangDo_Kim, a user in AVDBS.com
 This Python GUI program reads file names in a folder which is containing JAV (Japanese Adult Video) files,
 extract a product code from file names, and search a star name on Google UK search results
@@ -48,18 +48,25 @@ V2.1 변경 사항
 - 구글 검색 전 대기 시간 처리 부분을 기존 스레드에서 평범한 함수로 변경
 - 정보 및 질문 대화 상자를 기존 QDialog에서 QMessageBox로 교제.
 - 작업 결과 테이블 내용을 작업 시작 시 초기화함. 열 너비 조정.
-"""
 
+V2.11 변경 사항
+- 구글 검색 중 대기 시 진행 표시줄 표시
+
+V2.12 변경 사항
+- 설정 파일을 json 형식으로 변경
+"""
+import json
 import os
 import random
 import time
 
 import requests
-from PySide6.QtCore import Qt, QMimeData, QThread, Signal
+from PySide6.QtCore import Qt, QMimeData, QThread, Signal, QTimer
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import QMainWindow, QApplication, QWidget, QFileDialog, QDialog, QTableWidgetItem, QMessageBox
 from bs4 import BeautifulSoup
 
+from JAV_config import JAVConfig
 from JAV_star_names_finder_ui import Ui_Form
 from JAV_prod_code import JAV_prod_code, NoCodeError
 from change_prev_separator import change_prev_separator, NoWorkError
@@ -73,12 +80,12 @@ class MainWindow(QWidget, Ui_Form):
         self.setupUi(self)
 
         # instance variables
-        self.config_dict = {}
         self.program_path = os.getcwd()
         self.request_no = 0
         self.request_failure_counter = 0
 
         # initial works
+        self.JAV_config = JAVConfig()
         self.load_config_file()
         self.tableWidget.setColumnWidth(0, 55)
         self.tableWidget.setColumnWidth(1, 100)
@@ -87,6 +94,7 @@ class MainWindow(QWidget, Ui_Form):
         self.update_label_example_prev()
         self.update_label_example_new()
         self.label_status.setText("안녕하세요!")
+        self.progressBar.hide()
 
         # push buttons
         self.pushButton.clicked.connect(self.select_path)
@@ -109,7 +117,7 @@ class MainWindow(QWidget, Ui_Form):
                 "C 드라이브 최상위 경로 또는 Windows 주요 폴더를 선택했습니다. "
                 + "이러한 시스템 폴더에 대한 작업은 위험하므로 다른 경로를 선택해 주십시오.")
         elif path == "":
-            self.label_work_path.setText("*아직 선택되지 않음*")
+            self.label_work_path.setText(self.JAV_config.path_not_set)
         else:
             self.label_work_path.setText(path)
 
@@ -126,38 +134,20 @@ class MainWindow(QWidget, Ui_Form):
             self.label_example_new.setText(f"예: 미즈노 아사히{self.comboBox_sep_new.currentText()} URE-066 유) 상점가의 구멍 부인들")
 
     def load_config_file(self):
-        # 기존 설정 변수 읽어 오기(프로그램이 실행되는 경로에 JAV_Star_Names_Config.txt 설정 파일이 있는 경우).
-        if os.path.isfile("JAV_Star_Names_Config.txt"):
-            with open("JAV_Star_Names_Config.txt", "r", encoding="UTF-8") as f:
-                lines = f.readlines()
-                for line in lines:
-                    line_splits = line.split("=")
-                    self.config_dict[line_splits[0].strip()] = line_splits[1].strip()
-                try:
-                    self.config_dict["star_position"]
-                except KeyError:
-                    self.label_status.setText("기존 설정 파일 읽기 오류: star_position. 기본 설정 적용.")
-                else:
-                    self.comboBox_position_prev.setCurrentText(self.config_dict["star_position"])
-                    self.comboBox_position_new.setCurrentText(self.config_dict["star_position"])
+        os.chdir(self.program_path)
+        if self.JAV_config.load_from_file():
+            self.comboBox_position_prev.setCurrentText(self.JAV_config.star_position)
+            self.comboBox_position_new.setCurrentText(self.JAV_config.star_position)
 
-                try:
-                    self.config_dict["star_separator"]
-                except KeyError:
-                    self.label_status.setText("기존 설정 파일 읽기 오류: star_separator. 기본 설정 적용.")
-                else:
-                    self.comboBox_sep_prev.setCurrentText(self.config_dict["star_separator"])
-                    self.comboBox_sep_new.setCurrentText(self.config_dict["star_separator"])
+            self.comboBox_sep_prev.setCurrentText(self.JAV_config.separator)
+            self.comboBox_sep_new.setCurrentText(self.JAV_config.separator)
 
-                try:
-                    self.config_dict["working_path"]
-                except KeyError:
-                    self.label_status.setText("기존 설정 파일 읽기 오류: working_path. 기본 설정 적용.")
-                else:
-                    self.label_work_path.setText(self.config_dict["working_path"])
+            self.label_work_path.setText(self.JAV_config.working_path)
+        else:
+            self.label_status.setText("기존 설정 파일 읽기 오류: 기존 설정 유지.")
 
     def change_prev_separator(self):
-        if self.label_work_path.text() == "*아직 선택되지 않음*":
+        if self.label_work_path.text() == self.JAV_config.path_not_set:
             QMessageBox.information(self, "알림",
                 "먼저 작업 경로를 선택해 주십시오.")
             return None
@@ -179,7 +169,7 @@ class MainWindow(QWidget, Ui_Form):
         if not answer:
             return None
 
-        self.save_current_settings()
+        self.save_config_file()
         file_no = -1  # Current working file number
         file_no_total = 0
         file_no_newly_changed = 0
@@ -272,12 +262,12 @@ class MainWindow(QWidget, Ui_Form):
         self.comboBox_position_prev.setCurrentText(self.comboBox_position_new.currentText())
         self.comboBox_sep_prev.setCurrentText(self.comboBox_sep_new.currentText())
 
-    def save_current_settings(self):
+    def save_config_file(self):
+        self.JAV_config.star_position = self.comboBox_position_new.currentText()
+        self.JAV_config.separator = self.comboBox_sep_new.currentText()
+        self.JAV_config.working_path = self.label_work_path.text()
         os.chdir(self.program_path)
-        with open("JAV_Star_Names_Config.txt", "w", encoding="UTF-8") as f:
-            f.write(f"star_position={self.comboBox_position_new.currentText()}\n"
-                    + f"star_separator={self.comboBox_sep_new.currentText()}\n"
-                    + f"working_path={self.label_work_path.text()}")
+        self.JAV_config.save_to_file()
 
     def copy_to_clipboard(self):
         if self.tableWidget.rowCount() == 0:
@@ -324,14 +314,14 @@ class MainWindow(QWidget, Ui_Form):
 
     def search_stars(self):
         self.pushButton_3.setEnabled(False)
-        self.save_current_settings()
+        self.save_config_file()
 
         if self.request_no > 50:
             self.request_no_over_50_inform()
             self.pushButton_3.setEnabled(True)
             return None
 
-        if self.label_work_path.text() == "*아직 선택되지 않음*":
+        if self.label_work_path.text() == self.JAV_config.path_not_set:
             QMessageBox.information(self, "알림",
                 "먼저 작업 경로를 선택해 주십시오.")
             self.pushButton_3.setEnabled(True)
@@ -438,18 +428,23 @@ class MainWindow(QWidget, Ui_Form):
 
                     # Sleep for a few seconds to prevent Google's blocking
                     if self.request_no > 0:
-                        wait_time = random.uniform(2, 7)
-                        while wait_time > 0:
-                            self.label_status.setText(
-                                "나 로봇 아님(아마도?). 잠깐 노는 중... {:.2f}초".format(wait_time)
+                        wait_time = int(random.uniform(2000, 7000))
+                        progress = 0
+                        self.progressBar.show()
+                        self.progressBar.setValue(0)
+                        while progress <= wait_time:
+                            time.sleep(0.1)
+                            progress += 100
+                            self.progressBar.setValue(
+                                int((progress / wait_time) * 100)
                                 )
+                            self.label_status.setText(
+                                "나 로봇 아님(아마도?). 잠깐 노는 중... {:.1f}초".format(
+                                    abs((wait_time - progress) / 1000)
+                                )
+                            )
                             QApplication.processEvents()
-                            if wait_time > 1:
-                                time.sleep(1)
-                                wait_time -= 1
-                            else:
-                                time.sleep(wait_time)
-                                wait_time = 0
+                        self.progressBar.hide()
                         self.label_status.setText("작업 재개")
 
                     headers = {
