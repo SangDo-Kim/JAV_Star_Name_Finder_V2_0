@@ -1,7 +1,7 @@
 """JAV Config V1.0
 The class handles config settings of JAV Star Name Finder.
 It can save setting to a JSON file, and load from it.
-It also has a few constants.
+It also has a few constants. 
 """
 import json
 import os
